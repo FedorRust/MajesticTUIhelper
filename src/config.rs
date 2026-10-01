@@ -9,6 +9,8 @@ use crate::model::Server;
 #[derive(Serialize, Deserialize)]
 struct StateFile {
     server: String,
+    #[serde(default)]
+    theme: String,
 }
 
 pub fn config_dir() -> PathBuf {
@@ -25,19 +27,41 @@ pub fn state_path() -> PathBuf {
     config_dir().join("state.json")
 }
 
-pub fn load_server() -> Option<Server> {
+fn load_state() -> Option<StateFile> {
     let text = fs::read_to_string(state_path()).ok()?;
-    let state: StateFile = serde_json::from_str(&text).ok()?;
-    Server::parse(&state.server)
+    serde_json::from_str(&text).ok()
 }
 
-pub fn save_server(server: Server) -> io::Result<()> {
+fn store_state(server: Server, theme: &str) -> io::Result<()> {
     ensure_config_dir()?;
     let body = serde_json::to_string_pretty(&StateFile {
         server: server.as_str().to_string(),
+        theme: theme.to_string(),
     })
     .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
     fs::write(state_path(), body + "\n")
+}
+
+pub fn load_server() -> Option<Server> {
+    Server::parse(&load_state()?.server)
+}
+
+pub fn load_theme_id() -> Option<String> {
+    let theme = load_state()?.theme;
+    if theme.is_empty() {
+        None
+    } else {
+        Some(theme)
+    }
+}
+
+pub fn save_server(server: Server) -> io::Result<()> {
+    let theme = load_state().map(|state| state.theme).unwrap_or_default();
+    store_state(server, &theme)
+}
+
+pub fn save_theme(server: Server, theme: &str) -> io::Result<()> {
+    store_state(server, theme)
 }
 
 pub fn load_session() -> Vec<(String, String)> {

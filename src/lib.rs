@@ -5,4 +5,5 @@ pub mod model;
 pub mod parse;
 pub mod query;
 pub mod report;
+pub mod theme;
 pub mod ui;

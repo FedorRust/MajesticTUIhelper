@@ -12,7 +12,7 @@ use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
@@ -23,12 +23,15 @@ use crate::index::{self, load_corpus};
 use crate::model::{Article, Corpus, Server};
 use crate::query::{self, Hit, Query};
 use crate::report::report_line;
+use crate::theme::{self, Theme};
 
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Picker,
     Search,
     Card,
     Login,
+    Themes,
 }
 
 enum Click {
@@ -38,6 +41,7 @@ enum Click {
     CopyFull,
     Update,
     Github,
+    Theme(usize),
 }
 
 const GITHUB_URL: &str = "https://github.com/FedorRust";
@@ -95,6 +99,10 @@ pub struct App {
     job: Option<Job>,
     /// Живёт вместе с приложением: на X11 буфер пропадает, если владельца сразу уничтожить.
     clipboard: Option<arboard::Clipboard>,
+    theme: Theme,
+    theme_sel: usize,
+    theme_offset: usize,
+    theme_back: Screen,
 }
 
 enum Job {
@@ -118,6 +126,7 @@ impl App {
             Server::Portland => 0,
             Server::Memphis => 1,
         };
+        let theme = theme::get(&config::load_theme_id().unwrap_or_default());
         Ok(Self {
             laws,
             server,
@@ -141,6 +150,10 @@ impl App {
             hot: Vec::new(),
             job: None,
             clipboard: None,
+            theme_sel: theme::index_of(theme.id),
+            theme_offset: 0,
+            theme_back: Screen::Picker,
+            theme,
         })
     }
 
@@ -296,8 +309,12 @@ fn event_loop(
 }
 
 fn on_key(app: &mut App, key: KeyEvent) -> bool {
-    if key.code == KeyCode::F(5) && !matches!(app.screen, Screen::Login) {
+    if key.code == KeyCode::F(5) && !matches!(app.screen, Screen::Login | Screen::Themes) {
         begin_update(app);
+        return false;
+    }
+    if key.code == KeyCode::F(6) && !matches!(app.screen, Screen::Login | Screen::Themes) {
+        open_themes(app);
         return false;
     }
     match app.screen {
@@ -306,7 +323,18 @@ fn on_key(app: &mut App, key: KeyEvent) -> bool {
             KeyCode::Up | KeyCode::Char('k') => app.pick = 0,
             KeyCode::Down | KeyCode::Char('j') => app.pick = 1,
             KeyCode::Enter => app.confirm_server(),
+            KeyCode::Char('t') => open_themes(app),
             KeyCode::Esc => return true,
+            _ => {}
+        },
+        Screen::Themes => match key.code {
+            KeyCode::Up | KeyCode::Char('k') => move_theme(app, -1),
+            KeyCode::Down | KeyCode::Char('j') => move_theme(app, 1),
+            KeyCode::PageUp => move_theme(app, -8),
+            KeyCode::PageDown => move_theme(app, 8),
+            KeyCode::Enter | KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('t') => {
+                app.screen = app.theme_back;
+            }
             _ => {}
         },
         Screen::Search => match key.code {
@@ -415,11 +443,13 @@ fn on_mouse(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
         MouseEventKind::ScrollUp => match app.screen {
             Screen::Card => app.scroll = app.scroll.saturating_sub(3),
             Screen::Picker => app.pick = 0,
+            Screen::Themes => move_theme(app, -1),
             _ => move_sel(app, -1),
         },
         MouseEventKind::ScrollDown => match app.screen {
             Screen::Card => app.scroll = app.scroll.saturating_add(3),
             Screen::Picker => app.pick = 1,
+            Screen::Themes => move_theme(app, 1),
             _ => move_sel(app, 1),
         },
         MouseEventKind::Down(MouseButton::Left) => {
@@ -435,6 +465,7 @@ fn on_mouse(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
                     Click::CopyFull => Click::CopyFull,
                     Click::Update => Click::Update,
                     Click::Github => Click::Github,
+                    Click::Theme(index) => Click::Theme(*index),
                 });
             match action {
                 Some(Click::Pick(server)) => {
@@ -454,6 +485,7 @@ fn on_mouse(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
                 Some(Click::CopyFull) => copy_full(app),
                 Some(Click::Update) => begin_update(app),
                 Some(Click::Github) => open_github(app),
+                Some(Click::Theme(index)) => set_theme(app, index),
                 None => {}
             }
         }
@@ -685,8 +717,33 @@ fn open_github(app: &mut App) {
     }
 }
 
+fn open_themes(app: &mut App) {
+    app.theme_back = app.screen;
+    app.theme_sel = theme::index_of(app.theme.id);
+    app.screen = Screen::Themes;
+}
+
+fn set_theme(app: &mut App, index: usize) {
+    let Some(theme) = theme::ALL.get(index).copied() else {
+        return;
+    };
+    app.theme_sel = index;
+    app.theme = theme;
+    let _ = config::save_theme(app.server, theme.id);
+}
+
+fn move_theme(app: &mut App, delta: isize) {
+    let len = theme::ALL.len() as isize;
+    if len == 0 {
+        return;
+    }
+    let next = (app.theme_sel as isize + delta).clamp(0, len - 1) as usize;
+    set_theme(app, next);
+}
+
 fn draw(frame: &mut Frame, app: &mut App) {
     app.hot.clear();
+    frame.render_widget(Block::default().style(app.theme.text()), frame.area());
     match app.screen {
         Screen::Picker => {
             draw_picker(frame, app);
@@ -695,6 +752,7 @@ fn draw(frame: &mut Frame, app: &mut App) {
         Screen::Search => draw_search(frame, app),
         Screen::Card => draw_card(frame, app),
         Screen::Login => draw_login(frame, app),
+        Screen::Themes => draw_themes(frame, app),
     }
 }
 
@@ -716,7 +774,7 @@ fn draw_github(frame: &mut Frame, app: &mut App) {
         height,
     };
     let lines: Vec<Line> = GITHUB_LOGO.iter().copied().map(Line::raw).collect();
-    frame.render_widget(Paragraph::new(lines), rect);
+    frame.render_widget(Paragraph::new(lines).style(app.theme.accent()), rect);
     app.hot.push((rect, Click::Github));
 }
 
@@ -736,19 +794,78 @@ fn draw_picker(frame: &mut Frame, app: &mut App) {
     } else {
         "Enter — поиск по УК, КоАП, ДК и УПК."
     };
-    let title = Paragraph::new(hint).block(Block::default().borders(Borders::ALL).title(" mj "));
+    let title = Paragraph::new(hint).block(framed(app.theme, " mj "));
     frame.render_widget(title, chunks[0]);
     for (index, server) in [Server::Portland, Server::Memphis].into_iter().enumerate() {
         let style = if app.pick == index {
-            Style::default().add_modifier(Modifier::REVERSED)
+            app.theme.selected()
         } else {
-            Style::default()
+            app.theme.text()
         };
-        let row = Paragraph::new(format!("  {} ", server.title())).style(style);
+        let row = Paragraph::new(fit(
+            &format!("  {} ", server.title()),
+            chunks[index + 2].width as usize,
+        ))
+        .style(style);
         frame.render_widget(row, chunks[index + 2]);
         app.hot.push((chunks[index + 2], Click::Pick(server)));
     }
-    draw_footer(frame, chunks[5], app, "↑↓ сервер    Enter поиск    q выход");
+    draw_footer(
+        frame,
+        chunks[5],
+        app,
+        "↑↓ сервер    Enter поиск    t тема    q выход",
+    );
+}
+
+fn draw_themes(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    let chunks = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(3),
+        Constraint::Length(2),
+    ])
+    .split(area);
+    let intro = Paragraph::new("Схема применяется сразу и запоминается.")
+        .block(framed(app.theme, " Тема "));
+    frame.render_widget(intro, chunks[0]);
+    let list_area = chunks[1];
+    let height = list_area.height as usize;
+    keep_visible(
+        app.theme_sel,
+        theme::ALL.len(),
+        height,
+        &mut app.theme_offset,
+    );
+    let width = list_area.width as usize;
+    let offset = app.theme_offset;
+    let selected = app.theme_sel;
+    let mut lines = Vec::new();
+    for (index, theme) in theme::ALL.iter().enumerate().skip(offset).take(height) {
+        let style = if index == selected {
+            app.theme.selected()
+        } else {
+            app.theme.text()
+        };
+        lines.push(Line::styled(
+            fit(&format!("  {} ", theme.name), width.max(1)),
+            style,
+        ));
+        let row = Rect {
+            x: list_area.x,
+            y: list_area.y + (index - offset) as u16,
+            width: list_area.width,
+            height: 1,
+        };
+        app.hot.push((row, Click::Theme(index)));
+    }
+    frame.render_widget(Paragraph::new(lines).style(app.theme.text()), list_area);
+    draw_footer(
+        frame,
+        chunks[2],
+        app,
+        "↑↓ схема    Enter назад    Esc назад",
+    );
 }
 
 fn draw_search(frame: &mut Frame, app: &mut App) {
@@ -765,11 +882,16 @@ fn draw_search(frame: &mut Frame, app: &mut App) {
     } else {
         format!("> {}█", app.query)
     };
-    let input = Paragraph::new(field).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(format!(" Поиск · {} ", app.server.title())),
-    );
+    let input = Paragraph::new(field)
+        .style(if app.query.is_empty() {
+            app.theme.muted()
+        } else {
+            app.theme.text()
+        })
+        .block(framed(
+            app.theme,
+            format!(" Поиск · {} ", app.server.title()),
+        ));
     frame.render_widget(input, chunks[0]);
 
     let list_area = chunks[1];
@@ -811,11 +933,11 @@ fn draw_search(frame: &mut Frame, app: &mut App) {
     }
     for (slot, (index, label)) in rows.into_iter().enumerate() {
         let style = if index == selected {
-            Style::default().add_modifier(Modifier::REVERSED)
+            app.theme.selected()
         } else {
-            Style::default()
+            app.theme.text()
         };
-        lines.push(Line::styled(label, style));
+        lines.push(Line::styled(fit(&label, width.max(1)), style));
         let row = Rect {
             x: inner.x,
             y: inner.y + slot as u16,
@@ -824,18 +946,19 @@ fn draw_search(frame: &mut Frame, app: &mut App) {
         };
         app.hot.push((row, Click::Open(index)));
     }
-    frame.render_widget(Paragraph::new(lines), list_area);
+    frame.render_widget(Paragraph::new(lines).style(app.theme.text()), list_area);
 
     let button = Paragraph::new("Обновить с форума")
+        .style(app.theme.text())
         .alignment(ratatui::layout::Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
+        .block(framed(app.theme, ""));
     frame.render_widget(button, chunks[2]);
     app.hot.push((chunks[2], Click::Update));
     draw_footer(
         frame,
         chunks[3],
         app,
-        "↑↓ список    Enter карточка    Esc сервер    F5 обновить",
+        "↑↓ список    Enter карточка    Esc сервер    F5 обновить    F6 тема",
     );
 }
 
@@ -860,7 +983,7 @@ fn draw_card(frame: &mut Frame, app: &mut App) {
             article.family.label(),
             article.title
         ),
-        Style::default().add_modifier(Modifier::BOLD),
+        app.theme.title(),
     )));
     let jur = crate::report::jur_tag(&article.jurisdiction);
     if !jur.is_empty() {
@@ -885,9 +1008,9 @@ fn draw_card(frame: &mut Frame, app: &mut App) {
                 header.push_str(&"★".repeat(part.stars as usize));
             }
             let style = if selected {
-                Style::default().add_modifier(Modifier::REVERSED)
+                app.theme.selected()
             } else {
-                Style::default()
+                app.theme.text()
             };
             lines.push(Line::styled(header, style));
             if !part.composition.is_empty() {
@@ -900,17 +1023,17 @@ fn draw_card(frame: &mut Frame, app: &mut App) {
         }
     }
     let body = Paragraph::new(lines)
+        .style(app.theme.text())
         .wrap(Wrap { trim: false })
         .scroll((app.scroll, 0))
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(if app.full_text {
-                    " Полный текст "
-                } else {
-                    " Карточка "
-                }),
-        );
+        .block(framed(
+            app.theme,
+            if app.full_text {
+                " Полный текст "
+            } else {
+                " Карточка "
+            },
+        ));
     frame.render_widget(body, chunks[0]);
 
     let buttons = Layout::horizontal([
@@ -919,9 +1042,9 @@ fn draw_card(frame: &mut Frame, app: &mut App) {
         Constraint::Percentage(33),
     ])
     .split(chunks[1]);
-    render_button(frame, buttons[0], "Копировать");
-    render_button(frame, buttons[1], "Копировать всё");
-    render_button(frame, buttons[2], "Обновить");
+    render_button(frame, buttons[0], "Копировать", app.theme);
+    render_button(frame, buttons[1], "Копировать всё", app.theme);
+    render_button(frame, buttons[2], "Обновить", app.theme);
     app.hot.push((buttons[0], Click::CopyShort));
     app.hot.push((buttons[1], Click::CopyFull));
     app.hot.push((buttons[2], Click::Update));
@@ -945,12 +1068,7 @@ fn draw_login(frame: &mut Frame, app: &mut App) {
         width: box_width,
         height: box_height,
     };
-    frame.render_widget(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Вход на форум "),
-        popup,
-    );
+    frame.render_widget(framed(app.theme, " Вход на форум "), popup);
     let inner = Rect {
         x: popup.x + 1,
         y: popup.y + 1,
@@ -967,11 +1085,12 @@ fn draw_login(frame: &mut Frame, app: &mut App) {
     ])
     .split(inner);
     frame.render_widget(
-        Paragraph::new("Пароль только в этом запросе, на диск не пишется."),
+        Paragraph::new("Пароль только в этом запросе, на диск не пишется.")
+            .style(app.theme.muted()),
         rows[0],
     );
-    let user_style = field_style(app.login_field == 0);
-    let pass_style = field_style(app.login_field == 1);
+    let user_style = field_style(app.theme, app.login_field == 0);
+    let pass_style = field_style(app.theme, app.login_field == 1);
     frame.render_widget(Paragraph::new("Логин").style(user_style), rows[1]);
     let user = if app.login_field == 0 {
         format!("> {}█", app.login_user)
@@ -990,27 +1109,40 @@ fn draw_login(frame: &mut Frame, app: &mut App) {
     draw_footer(frame, rows[5], app, "Tab поле    Enter войти    Esc отмена");
 }
 
-fn render_button(frame: &mut Frame, area: Rect, label: &str) {
+fn framed(theme: Theme, title: impl Into<String>) -> Block<'static> {
+    let title = title.into();
+    let mut block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(theme.border())
+        .style(theme.text());
+    if !title.is_empty() {
+        block = block.title(Span::styled(title, theme.title()));
+    }
+    block
+}
+
+fn render_button(frame: &mut Frame, area: Rect, label: &str, theme: Theme) {
     let widget = Paragraph::new(label)
+        .style(theme.text())
         .alignment(ratatui::layout::Alignment::Center)
-        .block(Block::default().borders(Borders::ALL));
+        .block(framed(theme, ""));
     frame.render_widget(widget, area);
 }
 
-fn field_style(active: bool) -> Style {
+fn field_style(theme: Theme, active: bool) -> Style {
     if active {
-        Style::default().add_modifier(Modifier::REVERSED)
+        theme.selected()
     } else {
-        Style::default()
+        theme.text()
     }
 }
 
 fn draw_footer(frame: &mut Frame, area: Rect, app: &App, help: &str) {
     let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
     let status_style = if app.status_err {
-        Style::default().fg(Color::Red)
+        app.theme.error()
     } else {
-        Style::default()
+        app.theme.muted()
     };
     let status = if app.status.is_empty() {
         app.corpus.counts()
@@ -1018,7 +1150,7 @@ fn draw_footer(frame: &mut Frame, area: Rect, app: &App, help: &str) {
         app.status.clone()
     };
     frame.render_widget(Paragraph::new(status).style(status_style), rows[0]);
-    frame.render_widget(Paragraph::new(help), rows[1]);
+    frame.render_widget(Paragraph::new(help).style(app.theme.muted()), rows[1]);
 }
 
 fn keep_visible(sel: usize, len: usize, height: usize, offset: &mut usize) {
@@ -1032,6 +1164,12 @@ fn keep_visible(sel: usize, len: usize, height: usize, offset: &mut usize) {
     if sel >= *offset + height {
         *offset = sel + 1 - height;
     }
+}
+
+fn fit(text: &str, width: usize) -> String {
+    let clipped = clip(text, width);
+    let pad = width.saturating_sub(clipped.chars().count());
+    format!("{clipped}{}", " ".repeat(pad))
 }
 
 fn clip(text: &str, max_chars: usize) -> String {
@@ -1091,5 +1229,24 @@ mod tests {
         assert!(view.contains("Portland"));
         assert!(view.contains("Memphis"));
         assert!(view.contains("▄▄▄████▄▄▄"));
+    }
+
+    #[test]
+    fn theme_screen_lists_linux_schemes() {
+        let mut app = test_app(Server::Portland);
+        app.screen = Screen::Themes;
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| draw(frame, &mut app)).unwrap();
+        let view: String = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(view.contains("Catppuccin Mocha"));
+        assert!(view.contains("Gruvbox"));
+        assert!(view.contains("Nord"));
     }
 }
