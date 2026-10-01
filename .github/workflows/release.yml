@@ -1,0 +1,92 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            name: linux
+            bin: mj
+            archive: mj-linux.zip
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            name: windows
+            bin: mj.exe
+            archive: mj-windows.zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Linux libraries
+        if: matrix.name == 'linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Pack
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          BIN: ${{ matrix.bin }}
+          ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p pack/mj/laws
+          cp -a laws/portland laws/memphis pack/mj/laws/
+          cp "target/${TARGET}/release/${BIN}" pack/mj/
+          if [ "$BIN" = "mj" ]; then
+            chmod +x pack/mj/mj
+          fi
+          python3 - << 'PY'
+          import os
+          import zipfile
+          from pathlib import Path
+
+          root = Path("pack")
+          archive = Path(os.environ["ARCHIVE"])
+          with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+              for path in root.rglob("*"):
+                  if not path.is_file():
+                      continue
+                  info = zipfile.ZipInfo.from_file(path, path.relative_to(root).as_posix())
+                  mode = 0o755 if path.name == "mj" else 0o644
+                  info.external_attr = mode << 16
+                  bundle.writestr(info, path.read_bytes())
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          body: |
+            Распакуй архив. Внутри папка `mj`.
+
+            Windows: дважды щёлкни `mj.exe`.
+            Linux: в терминале `cd mj` и `./mj`.
+
+            Папку `laws` оставь рядом с программой.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,15 @@
+[package]
+name = "mj"
+version = "0.1.0"
+edition = "2021"
+description = "Офлайн-шпаргалка по законке Majestic RP"
+
+[dependencies]
+arboard = { version = "3", features = ["wayland-data-control"] }
+dirs = "6"
+ratatui = "0.29"
+regex = "1"
+reqwest = { version = "0.12", features = ["blocking"] }
+scraper = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
