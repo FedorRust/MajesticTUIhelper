@@ -6,7 +6,7 @@
 
 ## Скачать
 
-Открой [последний выпуск](https://github.com/FedorRust/MJTUIhelper/releases/latest) и скачай один архив:
+Открой [последний выпуск](https://github.com/FedorRust/MajesticTUIhelper/releases/latest) и скачай один архив:
 
 | Система | Файл |
 | --- | --- |
