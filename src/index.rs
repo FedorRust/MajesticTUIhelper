@@ -26,6 +26,9 @@ pub fn laws_root() -> Option<PathBuf> {
 
 pub fn load_corpus(root: &Path, server: Server) -> Result<Corpus, String> {
     let dir = root.join(server.as_str());
+    if !dir.is_dir() {
+        return Err(format!("законка {} ещё не скачана", server.title()));
+    }
     let mut entries: Vec<PathBuf> = fs::read_dir(&dir)
         .map_err(|err| format!("не читается {}: {err}", dir.display()))?
         .filter_map(|item| item.ok().map(|entry| entry.path()))

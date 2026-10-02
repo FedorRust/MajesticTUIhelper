@@ -4,6 +4,10 @@ use std::path::PathBuf;
 pub enum Server {
     Portland,
     Memphis,
+    Orlando,
+    Denver,
+    Phoenix,
+    Seattle,
 }
 
 impl Server {
@@ -11,6 +15,10 @@ impl Server {
         match value {
             "portland" => Some(Self::Portland),
             "memphis" => Some(Self::Memphis),
+            "orlando" => Some(Self::Orlando),
+            "denver" => Some(Self::Denver),
+            "phoenix" => Some(Self::Phoenix),
+            "seattle" => Some(Self::Seattle),
             _ => None,
         }
     }
@@ -19,6 +27,10 @@ impl Server {
         match self {
             Self::Portland => "portland",
             Self::Memphis => "memphis",
+            Self::Orlando => "orlando",
+            Self::Denver => "denver",
+            Self::Phoenix => "phoenix",
+            Self::Seattle => "seattle",
         }
     }
 
@@ -26,14 +38,61 @@ impl Server {
         match self {
             Self::Portland => "Portland",
             Self::Memphis => "Memphis",
+            Self::Orlando => "Orlando",
+            Self::Denver => "Denver",
+            Self::Phoenix => "Phoenix",
+            Self::Seattle => "Seattle",
         }
     }
 
-    pub fn forum_node(self) -> u32 {
+    /// Раздел «Законодательная база», если номер уже известен.
+    /// У Seattle и Phoenix раздел ищется по форуму во время обновления.
+    pub fn forum_node(self) -> Option<u32> {
         match self {
-            Self::Portland => 1338,
-            Self::Memphis => 1471,
+            Self::Portland => Some(1338),
+            Self::Memphis => Some(1471),
+            Self::Denver => Some(1276),
+            Self::Orlando => Some(1405),
+            Self::Phoenix | Self::Seattle => None,
         }
+    }
+
+    /// Раздел доп. правил сервера: от него можно подняться к категории и найти законку.
+    pub fn rules_forum(self) -> Option<&'static str> {
+        match self {
+            Self::Seattle => Some("https://forum.majestic-rp.ru/forums/seattle.1200/"),
+            Self::Phoenix => Some("https://forum.majestic-rp.ru/forums/phoenix.1262/"),
+            _ => None,
+        }
+    }
+
+    pub fn aliases(self) -> &'static [&'static str] {
+        match self {
+            Self::Portland => &["portland", "портленд"],
+            Self::Memphis => &["memphis", "мемфис"],
+            Self::Orlando => &["orlando", "орландо"],
+            Self::Denver => &["denver", "денвер"],
+            Self::Phoenix => &["phoenix", "финикс", "феникс"],
+            Self::Seattle => &["seattle", "сиэтл", "сиетл"],
+        }
+    }
+
+    pub fn all() -> [Self; 6] {
+        [
+            Self::Portland,
+            Self::Memphis,
+            Self::Orlando,
+            Self::Denver,
+            Self::Phoenix,
+            Self::Seattle,
+        ]
+    }
+
+    pub fn index(self) -> usize {
+        Self::all()
+            .iter()
+            .position(|server| *server == self)
+            .unwrap_or(0)
     }
 }
 
@@ -50,9 +109,9 @@ impl Family {
     pub fn label(self) -> &'static str {
         match self {
             Self::Uk => "УК",
-            Self::Koap => "КоАП",
+            Self::Koap => "АК",
             Self::Pdd => "ДК",
-            Self::Upk => "УПК",
+            Self::Upk => "ПК",
         }
     }
 

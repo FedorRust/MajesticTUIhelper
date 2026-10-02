@@ -5,6 +5,7 @@ edition = "2021"
 description = "Офлайн-шпаргалка по законке Majestic RP"
 
 [dependencies]
+aes = "0.8"
 arboard = { version = "3", features = ["wayland-data-control"] }
 dirs = "6"
 ratatui = "0.29"

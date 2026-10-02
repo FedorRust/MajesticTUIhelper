@@ -81,6 +81,7 @@ pub struct App {
     corpus: Corpus,
     screen: Screen,
     pick: usize,
+    pick_offset: usize,
     query: String,
     suppress: Option<String>,
     results: Vec<Hit>,
@@ -121,11 +122,19 @@ impl App {
     }
 
     fn open(laws: PathBuf, server: Server, restored: bool) -> Result<Self, String> {
-        let corpus = load_corpus(&laws, server)?;
-        let pick = match server {
-            Server::Portland => 0,
-            Server::Memphis => 1,
+        let (corpus, status, status_err) = match load_corpus(&laws, server) {
+            Ok(corpus) => (corpus, String::new(), false),
+            Err(err) => (
+                Corpus {
+                    server,
+                    articles: Vec::new(),
+                    files: Vec::new(),
+                },
+                err,
+                true,
+            ),
         };
+        let pick = server.index();
         let theme = theme::get(&config::load_theme_id().unwrap_or_default());
         Ok(Self {
             laws,
@@ -134,6 +143,7 @@ impl App {
             corpus,
             screen: Screen::Picker,
             pick,
+            pick_offset: 0,
             query: String::new(),
             suppress: None,
             results: Vec::new(),
@@ -145,8 +155,8 @@ impl App {
             login_user: String::new(),
             login_pass: String::new(),
             login_field: 0,
-            status: String::new(),
-            status_err: false,
+            status,
+            status_err,
             hot: Vec::new(),
             job: None,
             clipboard: None,
@@ -158,11 +168,10 @@ impl App {
     }
 
     fn confirm_server(&mut self) {
-        self.server = if self.pick == 0 {
-            Server::Portland
-        } else {
-            Server::Memphis
-        };
+        self.server = Server::all()
+            .get(self.pick)
+            .copied()
+            .unwrap_or(Server::Portland);
         let _ = config::save_server(self.server);
         self.restored = true;
         match load_corpus(&self.laws, self.server) {
@@ -320,8 +329,8 @@ fn on_key(app: &mut App, key: KeyEvent) -> bool {
     match app.screen {
         Screen::Picker => match key.code {
             KeyCode::Char('q') => return true,
-            KeyCode::Up | KeyCode::Char('k') => app.pick = 0,
-            KeyCode::Down | KeyCode::Char('j') => app.pick = 1,
+            KeyCode::Up | KeyCode::Char('k') => move_pick(app, -1),
+            KeyCode::Down | KeyCode::Char('j') => move_pick(app, 1),
             KeyCode::Enter => app.confirm_server(),
             KeyCode::Char('t') => open_themes(app),
             KeyCode::Esc => return true,
@@ -442,13 +451,13 @@ fn on_mouse(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
     match kind {
         MouseEventKind::ScrollUp => match app.screen {
             Screen::Card => app.scroll = app.scroll.saturating_sub(3),
-            Screen::Picker => app.pick = 0,
+            Screen::Picker => move_pick(app, -1),
             Screen::Themes => move_theme(app, -1),
             _ => move_sel(app, -1),
         },
         MouseEventKind::ScrollDown => match app.screen {
             Screen::Card => app.scroll = app.scroll.saturating_add(3),
-            Screen::Picker => app.pick = 1,
+            Screen::Picker => move_pick(app, 1),
             Screen::Themes => move_theme(app, 1),
             _ => move_sel(app, 1),
         },
@@ -469,10 +478,7 @@ fn on_mouse(app: &mut App, kind: MouseEventKind, column: u16, row: u16) {
                 });
             match action {
                 Some(Click::Pick(server)) => {
-                    app.pick = match server {
-                        Server::Portland => 0,
-                        Server::Memphis => 1,
-                    };
+                    app.pick = server.index();
                     app.confirm_server();
                 }
                 Some(Click::Open(index)) => {
@@ -598,11 +604,10 @@ fn copy_wl_copy_stdin(text: &str) -> Result<(), String> {
 
 fn begin_update(app: &mut App) {
     if matches!(app.screen, Screen::Picker) {
-        app.server = if app.pick == 0 {
-            Server::Portland
-        } else {
-            Server::Memphis
-        };
+        app.server = Server::all()
+            .get(app.pick)
+            .copied()
+            .unwrap_or(Server::Portland);
         if let Ok(corpus) = load_corpus(&app.laws, app.server) {
             app.corpus = corpus;
         }
@@ -616,7 +621,7 @@ fn begin_update(app: &mut App) {
         );
         return;
     }
-    app.set_status("Обновляю УК, КоАП, ДК и УПК…", false);
+    app.set_status("Обновляю УК, АК, ДК и ПК…", false);
     app.job = Some(Job::Update);
 }
 
@@ -680,7 +685,7 @@ fn run_update(app: &mut App) {
         }
         Err(UpdateError::Failed(message)) => {
             app.set_status(&message, true);
-            if !matches!(app.screen, Screen::Login) {
+            if !matches!(app.screen, Screen::Login | Screen::Picker) {
                 app.screen = Screen::Search;
             }
         }
@@ -778,13 +783,18 @@ fn draw_github(frame: &mut Frame, app: &mut App) {
     app.hot.push((rect, Click::Github));
 }
 
+fn move_pick(app: &mut App, delta: isize) {
+    let len = Server::all().len() as isize;
+    if len == 0 {
+        return;
+    }
+    app.pick = (app.pick as isize + delta).clamp(0, len - 1) as usize;
+}
+
 fn draw_picker(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     let chunks = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(1),
         Constraint::Min(1),
         Constraint::Length(2),
     ])
@@ -792,11 +802,25 @@ fn draw_picker(frame: &mut Frame, app: &mut App) {
     let hint = if app.restored {
         "Прошлый сервер выделен. Enter — поиск."
     } else {
-        "Enter — поиск по УК, КоАП, ДК и УПК."
+        "Enter — поиск по УК, АК, ДК и ПК."
     };
     let title = Paragraph::new(hint).block(framed(app.theme, " mj "));
     frame.render_widget(title, chunks[0]);
-    for (index, server) in [Server::Portland, Server::Memphis].into_iter().enumerate() {
+    let servers = Server::all();
+    let height = chunks[1].height as usize;
+    keep_visible(app.pick, servers.len(), height, &mut app.pick_offset);
+    for (index, server) in servers
+        .iter()
+        .enumerate()
+        .skip(app.pick_offset)
+        .take(height.max(1))
+    {
+        let rect = Rect {
+            x: chunks[1].x,
+            y: chunks[1].y + (index - app.pick_offset) as u16,
+            width: chunks[1].width,
+            height: 1,
+        };
         let style = if app.pick == index {
             app.theme.selected()
         } else {
@@ -804,15 +828,15 @@ fn draw_picker(frame: &mut Frame, app: &mut App) {
         };
         let row = Paragraph::new(fit(
             &format!("  {} ", server.title()),
-            chunks[index + 2].width as usize,
+            rect.width as usize,
         ))
         .style(style);
-        frame.render_widget(row, chunks[index + 2]);
-        app.hot.push((chunks[index + 2], Click::Pick(server)));
+        frame.render_widget(row, rect);
+        app.hot.push((rect, Click::Pick(*server)));
     }
     draw_footer(
         frame,
-        chunks[5],
+        chunks[2],
         app,
         "↑↓ сервер    Enter поиск    t тема    q выход",
     );
@@ -1214,6 +1238,15 @@ mod tests {
     }
 
     #[test]
+    fn missing_laws_still_opens_picker() {
+        let laws = std::env::temp_dir().join(format!("mj-empty-{}", std::process::id()));
+        let app = App::open(laws, Server::Seattle, true).expect("picker");
+        assert!(matches!(app.screen, Screen::Picker));
+        assert!(app.status.contains("Seattle"));
+        assert!(app.status_err);
+    }
+
+    #[test]
     fn picker_renders_both_servers() {
         let mut app = test_app(Server::Portland);
         let backend = TestBackend::new(80, 24);
@@ -1228,6 +1261,10 @@ mod tests {
             .collect();
         assert!(view.contains("Portland"));
         assert!(view.contains("Memphis"));
+        assert!(view.contains("Orlando"));
+        assert!(view.contains("Denver"));
+        assert!(view.contains("Phoenix"));
+        assert!(view.contains("Seattle"));
         assert!(view.contains("▄▄▄████▄▄▄"));
     }
 

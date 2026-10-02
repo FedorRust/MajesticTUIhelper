@@ -6,7 +6,7 @@ use crate::model::{Article, Corpus, Family};
 
 static CODE_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)^(\d+(?:\.\d+)*)(?:\s*(?:ч\.?|часть)\s*(\d+(?:\.\d+)*))?(?:\s*(ук|коап|пдд|дк|упк|пк)\.?)?$",
+        r"(?i)^(\d+(?:\.\d+)*)(?:\s*(?:ч\.?|часть)\s*(\d+(?:\.\d+)*))?(?:\s*(ук|коап|ак|пдд|дк|упк|пк)\.?)?$",
     )
     .expect("code query")
 });
@@ -121,7 +121,7 @@ fn parse_prefix(input: &str) -> Option<String> {
 fn family_suffix(suffix: &str) -> Option<Family> {
     match suffix {
         "ук" => Some(Family::Uk),
-        "коап" => Some(Family::Koap),
+        "коап" | "ак" => Some(Family::Koap),
         "пдд" | "дк" => Some(Family::Pdd),
         "упк" | "пк" => Some(Family::Upk),
         _ => None,
@@ -129,7 +129,7 @@ fn family_suffix(suffix: &str) -> Option<Family> {
 }
 
 fn is_partial_suffix(tail: &str) -> bool {
-    const FULL: &[&str] = &["ук", "коап", "пдд", "дк", "упк", "пк"];
+    const FULL: &[&str] = &["ук", "коап", "ак", "пдд", "дк", "упк", "пк"];
     FULL.iter()
         .any(|name| *name != tail && name.starts_with(tail))
 }
@@ -418,6 +418,22 @@ mod tests {
             .iter()
             .any(|hit| corpus.articles[hit.article].code == "17.1"));
         assert_eq!(Family::Pdd.label(), "ДК");
+        assert_eq!(Family::Koap.label(), "АК");
+        assert_eq!(Family::Upk.label(), "ПК");
+        assert!(matches!(
+            parse_query("10ак"),
+            Query::Code {
+                family: Some(Family::Koap),
+                ..
+            }
+        ));
+        assert!(matches!(
+            parse_query("10пк"),
+            Query::Code {
+                family: Some(Family::Upk),
+                ..
+            }
+        ));
     }
 
     #[test]
