@@ -46,14 +46,15 @@ impl Server {
     }
 
     /// Раздел «Законодательная база», если номер уже известен.
-    /// У Seattle и Phoenix раздел ищется по форуму во время обновления.
+    /// У Seattle раздел ищется по форуму во время обновления.
     pub fn forum_node(self) -> Option<u32> {
         match self {
             Self::Portland => Some(1338),
             Self::Memphis => Some(1471),
             Self::Denver => Some(1276),
             Self::Orlando => Some(1405),
-            Self::Phoenix | Self::Seattle => None,
+            Self::Phoenix => Some(1213),
+            Self::Seattle => None,
         }
     }
 

@@ -13,6 +13,13 @@ static PUNISH_AT: LazyLock<Regex> =
 static HEADER: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)^\s*Статья\s+(\d+(?:\.\d+)*)\s*(.*)$").expect("header regex")
 });
+/// Denver и Phoenix пишут состав строкой `6.2 (F/R) Убийство`, без слова «Статья».
+static NUMBERED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?m)^[ \t]*(\d+(?:\.\d+)+)\.?[ \t]+(\S.*)$").expect("numbered header")
+});
+static PAREN_JUR: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\(([A-Za-z]{1,4}(?:/[A-Za-z]{1,4})*)\)\s*(.*)$").expect("paren jurisdiction")
+});
 static BRACKET: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"\[([^\[\]]+)\]").expect("bracket regex"));
 static PART_LINE: LazyLock<Regex> = LazyLock::new(|| {
@@ -21,11 +28,15 @@ static PART_LINE: LazyLock<Regex> = LazyLock::new(|| {
 
 pub fn parse_document(text: &str, family: Family) -> Vec<Article> {
     let text = clean(text);
-    let starts: Vec<usize> = ARTICLE_AT.find_iter(&text).map(|m| m.start()).collect();
+    let mut starts: Vec<usize> = ARTICLE_AT.find_iter(&text).map(|m| m.start()).collect();
+    let numbered = starts.is_empty();
+    if numbered {
+        starts = NUMBERED.find_iter(&text).map(|m| m.start()).collect();
+    }
     let mut articles = Vec::new();
     for (index, start) in starts.iter().copied().enumerate() {
         let end = starts.get(index + 1).copied().unwrap_or(text.len());
-        if let Some(article) = parse_article(&text[start..end], family) {
+        if let Some(article) = parse_article(&text[start..end], family, numbered) {
             articles.push(article);
         }
     }
@@ -41,13 +52,27 @@ pub fn source_url(text: &str) -> Option<String> {
     })
 }
 
-fn parse_article(chunk: &str, family: Family) -> Option<Article> {
+fn parse_article(chunk: &str, family: Family, numbered: bool) -> Option<Article> {
     let pretty = break_markers(chunk);
     let mut lines = pretty.lines();
     let header = lines.next()?.trim();
-    let captures = HEADER.captures(header)?;
-    let code = captures.get(1)?.as_str().to_string();
-    let rest = captures.get(2)?.as_str();
+    let (code, rest) = if numbered {
+        let captures = NUMBERED.captures(header)?;
+        let code = captures.get(1)?.as_str().to_string();
+        let mut rest = captures.get(2)?.as_str().trim().to_string();
+        if let Some(jur) = PAREN_JUR.captures(&rest) {
+            rest = format!("[{}] {}", jur.get(1)?.as_str(), jur.get(2)?.as_str());
+        }
+        (code, rest)
+    } else {
+        let captures = HEADER.captures(header)?;
+        (
+            captures.get(1)?.as_str().to_string(),
+            captures.get(2)?.as_str().to_string(),
+        )
+    };
+    let rest_owned = rest;
+    let rest = rest_owned.as_str();
     let stars = rest.chars().filter(|ch| *ch == '★').count() as u8;
     let jurisdiction = BRACKET
         .captures(rest)
@@ -312,6 +337,18 @@ mod tests {
                 || article.parts[0].punishment.contains("40")
         );
         assert_eq!(article.parts[0].stars, 4);
+    }
+
+    #[test]
+    fn denver_numbered_murder_is_an_article() {
+        let articles = parse_document(&law("denver", "ugolovnyi-kodeks"), Family::Uk);
+        let murder = articles
+            .iter()
+            .find(|article| article.code == "6.2")
+            .expect("6.2");
+        assert!(murder.title.contains("Убийство"));
+        assert_eq!(murder.jurisdiction, "F/R");
+        assert!(murder.parts[0].punishment.contains("40 месяцев"));
     }
 
     #[test]
