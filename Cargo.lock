@@ -1161,7 +1161,7 @@ dependencies = [
 
 [[package]]
 name = "mj"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "aes",
  "arboard",
