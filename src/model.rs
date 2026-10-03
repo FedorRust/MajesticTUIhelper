@@ -8,6 +8,7 @@ pub enum Server {
     Denver,
     Phoenix,
     Seattle,
+    NewYork,
 }
 
 impl Server {
@@ -19,6 +20,7 @@ impl Server {
             "denver" => Some(Self::Denver),
             "phoenix" => Some(Self::Phoenix),
             "seattle" => Some(Self::Seattle),
+            "new-york" => Some(Self::NewYork),
             _ => None,
         }
     }
@@ -31,6 +33,7 @@ impl Server {
             Self::Denver => "denver",
             Self::Phoenix => "phoenix",
             Self::Seattle => "seattle",
+            Self::NewYork => "new-york",
         }
     }
 
@@ -42,6 +45,7 @@ impl Server {
             Self::Denver => "Denver",
             Self::Phoenix => "Phoenix",
             Self::Seattle => "Seattle",
+            Self::NewYork => "New York",
         }
     }
 
@@ -54,6 +58,7 @@ impl Server {
             Self::Denver => Some(1276),
             Self::Orlando => Some(1405),
             Self::Phoenix => Some(1213),
+            Self::NewYork => Some(84),
             Self::Seattle => None,
         }
     }
@@ -75,10 +80,11 @@ impl Server {
             Self::Denver => &["denver", "денвер"],
             Self::Phoenix => &["phoenix", "финикс", "феникс"],
             Self::Seattle => &["seattle", "сиэтл", "сиетл"],
+            Self::NewYork => &["new york", "new-york", "newyork", "нью-йорк", "нью йорк"],
         }
     }
 
-    pub fn all() -> [Self; 6] {
+    pub fn all() -> [Self; 7] {
         [
             Self::Portland,
             Self::Memphis,
@@ -86,6 +92,7 @@ impl Server {
             Self::Denver,
             Self::Phoenix,
             Self::Seattle,
+            Self::NewYork,
         ]
     }
 

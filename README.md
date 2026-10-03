@@ -30,7 +30,7 @@ cd mj
 
 ## Как пользоваться
 
-1. Выбери сервер: Portland, Memphis, Orlando, Denver, Phoenix или Seattle. Enter открывает поиск.
+1. Выбери сервер: Portland, Memphis, Orlando, Denver, Phoenix, Seattle или New York. Enter открывает поиск.
 2. Введи номер статьи (`17`, `10.5ук`) или слова из названия (`угон`).
 3. Enter открывает карточку: состав и наказание. Ещё раз Enter или `f` показывает полный текст.
 

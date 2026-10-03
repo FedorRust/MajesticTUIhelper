@@ -1265,6 +1265,7 @@ mod tests {
         assert!(view.contains("Denver"));
         assert!(view.contains("Phoenix"));
         assert!(view.contains("Seattle"));
+        assert!(view.contains("New York"));
         assert!(view.contains("▄▄▄████▄▄▄"));
     }
 
